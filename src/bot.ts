@@ -459,6 +459,21 @@ function wireHandlers(bot: Chat) {
       company = event.value || company;
     }
 
+    if (!originalDeal && company !== "the company") {
+      originalDeal = {
+        company,
+        founder: founder || "Unknown",
+        founderLinkedIn: undefined,
+        stage: "Unknown",
+        roundSize: "Unknown",
+        geo: "Unknown",
+        sector: sector || "Unknown",
+        source: "Unknown",
+        notes: undefined,
+        confidence: "medium",
+      };
+    }
+
     await runDeepEnrich(event.thread!, company, founder, sector, originalDeal);
   };
 
