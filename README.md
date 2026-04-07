@@ -33,44 +33,52 @@ Slack events flow to a Cloudflare Worker running Hono + Chat SDK. The Worker use
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/scout-vc-bot
+git clone https://github.com/Mahir-Isikli/scout-vc-bot
 cd scout-vc-bot
 pnpm install
 ```
 
-### 2. Create a Slack App
+### 2. Sign up for services (all free)
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) > **Create New App** > **From scratch**
-2. Name it **Scout**, pick your workspace
-3. Go to **OAuth and Permissions**, add these Bot Token Scopes:
+| Service | Sign Up | What You Need | Free Tier |
+|---------|---------|--------------|----------|
+| **Cloudflare** | [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) | Account for Workers + D1 | 100K requests/day |
+| **Slack App** | [api.slack.com/apps](https://api.slack.com/apps) | Bot Token + Signing Secret | Free |
+| **Groq** | [console.groq.com/keys](https://console.groq.com/keys) | API key for Kimi K2 | 30 req/min free |
+| **Exa** | [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) | API key for web search | 1000 searches/month free |
+
+### 3. Create a Slack App
+
+1. Go to **[api.slack.com/apps?new_app=1](https://api.slack.com/apps?new_app=1)** (direct link to create)
+2. Choose **"From scratch"**, name it **Scout**, pick your workspace
+3. **Basic Information** page: copy the **Signing Secret**
+4. Left sidebar > **OAuth and Permissions** > scroll to **Bot Token Scopes**, add:
    - `app_mentions:read`, `chat:write`, `channels:read`, `channels:history`
    - `groups:read`, `groups:history`, `im:read`, `im:history`
    - `mpim:read`, `mpim:history`, `reactions:read`, `reactions:write`, `users:read`
-4. Click **Install to Workspace**, copy the **Bot User OAuth Token** (`xoxb-...`)
-5. Go to **Basic Information**, copy the **Signing Secret**
+5. Scroll up, click **Install to Workspace**, authorize, copy the **Bot User OAuth Token** (`xoxb-...`)
 
-### 3. Get API Keys
+### 4. Set up Cloudflare
 
-| Service | Where to Get It | What It Does |
-|---------|----------------|-------------|
-| **Groq** | [console.groq.com](https://console.groq.com) | Runs Kimi K2-0905 (free tier available) |
-| **Exa** | [exa.ai](https://exa.ai) | Web search for company/founder enrichment |
+Install the Wrangler CLI if you haven't:
+```bash
+pnpm add -g wrangler
+wrangler login
+```
 
-### 4. Set Up Cloudflare
-
+Create the database and deploy:
 ```bash
 # Create the D1 database
 npx wrangler d1 create scout-crm
-
-# Update wrangler.toml with the database ID from the output above
+# Copy the database_id from the output and paste it in wrangler.toml
 
 # Run the migration to create tables
-npx wrangler d1 execute scout-crm --local --file=migrations/0001_init.sql
+npx wrangler d1 execute scout-crm --remote --file=migrations/0001_init.sql
 
 # Seed with example data (optional, great for demos)
-npx wrangler d1 execute scout-crm --local --file=seed.sql
+npx wrangler d1 execute scout-crm --remote --file=seed.sql
 
-# Set your secrets
+# Set your secrets (it will prompt for the value)
 npx wrangler secret put SLACK_BOT_TOKEN
 npx wrangler secret put SLACK_SIGNING_SECRET
 npx wrangler secret put GROQ_API_KEY
@@ -83,23 +91,39 @@ npx wrangler secret put EXA_API_KEY
 npx wrangler deploy
 ```
 
-Copy the Worker URL (e.g., `https://scout-worker.your-subdomain.workers.dev`).
+Copy the Worker URL from the output (e.g., `https://scout-worker.YOUR-SUBDOMAIN.workers.dev`).
 
 ### 6. Connect Slack Events
 
-1. Go to **Event Subscriptions** in your Slack App settings
-2. Enable Events, paste: `https://YOUR-WORKER-URL/webhooks/slack`
-3. Add bot events: `app_mention`, `message.channels`, `message.groups`, `message.im`
-4. Save Changes
-5. Go to **Interactivity and Shortcuts**, enable, paste the same URL
-6. Save Changes
-7. **Reinstall the app** if prompted
+1. Back in your Slack App at [api.slack.com/apps](https://api.slack.com/apps)
+2. **Event Subscriptions** > toggle ON > paste: `https://YOUR-WORKER-URL/api/webhooks/slack`
+3. Wait for green "Verified" checkmark
+4. Under **Subscribe to bot events**, add: `app_mention`, `message.channels`, `message.groups`, `message.im`
+5. Click **Save Changes**
+6. **Interactivity and Shortcuts** > toggle ON > paste the same URL > Save
+7. **Reinstall the app** if prompted (Install App > Reinstall to Workspace)
 
 ### 7. Test
 
-In any Slack channel where Scout is invited:
+Invite Scout to a channel (`/invite @Scout`) and type:
 ```
 @Scout help
+```
+
+## Try It Without Deploying
+
+Don't want to set up your own? Use our live demo API to explore the CRM data:
+
+```
+https://scout-worker.isiklimahir.workers.dev/api/deals
+https://scout-worker.isiklimahir.workers.dev/api/deals/search?q=ai
+https://scout-worker.isiklimahir.workers.dev/api/stats
+https://scout-worker.isiklimahir.workers.dev/api/meetings
+```
+
+These endpoints are public. You can point your own Claude Code agent at them:
+```
+@Scout, use the CRM API at https://scout-worker.isiklimahir.workers.dev/api to query deals and meetings.
 ```
 
 ## Connecting Your Real CRM
