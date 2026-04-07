@@ -80,11 +80,17 @@ function detectIntent(text: string): Intent {
   if (lower.startsWith("enrich ") || lower.startsWith("research ") || lower.startsWith("look up ")) {
     return { type: "enrich", target: text.replace(/^(?:enrich|research|look\s+up)\s+/i, "").trim() };
   }
+  // Deal parsing: check BEFORE query so long deal descriptions aren't misclassified
+  const dealIndicators = ["raising","round","seed","series","pre-seed","founder","ceo","startup","linkedin.com","pitch","deck","inbound","intro","referred","check out","take a look","forwarding","fyi","new deal","deal:","company:","million","saas","b2b","fintech","healthtech","deeptech","ai ","ml "];
+  const hasDealSignals = dealIndicators.filter((ind) => lower.includes(ind)).length;
+  if (hasDealSignals >= 2 || (lower.length > 60 && hasDealSignals >= 1)) {
+    return { type: "parse_deal", text };
+  }
+  // CRM queries
   if (/^(why did we|how many|what|who|when did|show me|find |check |list |get |search |query )/i.test(lower) || lower.includes("?") || /\b(crm|deals?|pipeline|portfolio|reviewing|rejected|passed|invested|all deals|our deals|the deals)\b/i.test(lower)) {
     return { type: "query", question: text };
   }
-  const dealIndicators = ["raising","round","seed","series","pre-seed","founder","ceo","startup","linkedin.com","pitch","deck","inbound","intro","referred","check out","take a look","forwarding","fyi","new deal","deal:","company:","million","saas","b2b","fintech","healthtech","deeptech","ai ","ml "];
-  if (lower.length > 40 || dealIndicators.some((ind) => lower.includes(ind))) {
+  if (lower.length > 40) {
     return { type: "parse_deal", text };
   }
   return { type: "general", text };
@@ -321,7 +327,8 @@ function wireHandlers(bot: Chat) {
     const text = message.text?.trim();
     if (!text) return;
     // Skip messages that contain a bot mention (already handled by onNewMention)
-    if (text.includes("<@U0AR042K291>") || /@U[A-Z0-9]+/i.test(text)) {
+    // Chat SDK strips angle brackets, so text looks like "@U0AR042K291 help"
+    if (/@?U[A-Z0-9]{8,}/i.test(text)) {
       console.log(`[Scout] skipping subscribed msg (has mention, handled by onNewMention)`);
       return;
     }
