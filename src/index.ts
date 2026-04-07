@@ -88,7 +88,7 @@ app.post("/api/webhooks/slack", async (c) => {
         : "";
       const dedupKey = [
         ev.channel || "",
-        ev.thread_ts || ev.ts || ev.event_ts || parsed.event_id || "",
+        ev.ts || ev.event_ts || parsed.event_id || "",
         ev.user || "",
         normalizedText,
       ].join("|");

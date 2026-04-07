@@ -323,6 +323,26 @@ async function handleEnrich(thread: any, target: string) {
   await thread.post(result.textStream);
 }
 
+async function buildDeepResearchReport(model: LanguageModel, company: string, src: string) {
+  const system = `${SCOUT_SYSTEM_PROMPT}\n\nProduce a DEEP RESEARCH REPORT:\n## Company Overview\n## Founder & Team\n## Product & Traction\n## Funding History\n## Competitive Landscape\n## Market Opportunity\n## Key Risks\n## Sources\n\nCite [1],[2] etc.\n\nResults:\n${src}`;
+
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const { text } = await generateText({
+        model,
+        system,
+        prompt: `Deep research report for: ${company}`,
+      });
+      return text;
+    } catch (err) {
+      lastErr = err;
+      await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+    }
+  }
+  throw lastErr;
+}
+
 async function runDeepEnrich(thread: any, company: string, founder?: string, sector?: string, originalDeal?: ParsedDeal) {
   const { model, exa } = ctx();
   const normalizedFounder = founder && founder !== "Unknown" ? founder : undefined;
@@ -340,7 +360,6 @@ async function runDeepEnrich(thread: any, company: string, founder?: string, sec
 
     let all = [...companyResults, ...founderResults, ...competitorResults, ...marketResults];
 
-    // Fallback to the faster enrichment path if deep mode returns nothing useful.
     if (all.length === 0) {
       const fallback = await enrichDeal(exa, company, normalizedFounder, normalizedSector);
       all = [...fallback.companyResults, ...fallback.founderResults, ...fallback.competitorResults, ...fallback.fundingNews];
@@ -351,20 +370,23 @@ async function runDeepEnrich(thread: any, company: string, founder?: string, sec
       return;
     }
 
-    const src = all.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.text}`).join("\n\n---\n\n");
+    const compactResults = all.slice(0, 12).map((r, i) => ({
+      idx: i + 1,
+      title: r.title,
+      url: r.url,
+      text: (r.text || "").slice(0, 1200),
+    }));
+    const src = compactResults.map((r) => `[${r.idx}] ${r.title}\n${r.url}\n${r.text}`).join("\n\n---\n\n");
+
     const refinedDealPromise = originalDeal
       ? parseDealFromText(
           model,
-          `Original structured deal:\n${JSON.stringify(originalDeal, null, 2)}\n\nResearch notes for ${company}:\n${src.slice(0, 12000)}`,
+          `Original structured deal:\n${JSON.stringify(originalDeal, null, 2)}\n\nResearch notes for ${company}:\n${src.slice(0, 10000)}`,
         )
       : Promise.resolve(null);
 
-    const result = streamText({
-      model,
-      system: `${SCOUT_SYSTEM_PROMPT}\n\nProduce a DEEP RESEARCH REPORT:\n## Company Overview\n## Founder & Team\n## Product & Traction\n## Funding History\n## Competitive Landscape\n## Market Opportunity\n## Key Risks\n## Sources\n\nCite [1],[2] etc.\n\nResults:\n${src}`,
-      prompt: `Deep research report for: ${company}`,
-    });
-    await thread.post(result.textStream);
+    const reportText = await buildDeepResearchReport(model, company, src);
+    await thread.post(reportText);
 
     const fallbackDeal: ParsedDeal | undefined = originalDeal || {
       company,
