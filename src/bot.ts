@@ -7,7 +7,7 @@ import {
 } from "chat";
 import { createSlackAdapter } from "@chat-adapter/slack";
 import { createMemoryState } from "@chat-adapter/state-memory";
-import { streamText } from "ai";
+import { streamText, generateText } from "ai";
 import type { LanguageModel } from "ai";
 import type Exa from "exa-js";
 
@@ -366,11 +366,35 @@ async function runDeepEnrich(thread: any, company: string, founder?: string, sec
     });
     await thread.post(result.textStream);
 
-    const refinedDeal = await refinedDealPromise;
-    if (originalDeal && refinedDeal) {
-      const mergedDeal = mergeParsedDeals(originalDeal, refinedDeal);
-      mergedDeal.notes = [mergedDeal.notes, "Deep research completed. Ready to save to CRM."].filter(Boolean).join(" | ");
-      await thread.post(buildDealCard(mergedDeal));
+    const fallbackDeal: ParsedDeal | undefined = originalDeal || {
+      company,
+      founder: normalizedFounder || "Unknown",
+      founderLinkedIn: undefined,
+      stage: "Unknown",
+      roundSize: "Unknown",
+      geo: "Unknown",
+      sector: normalizedSector || "Unknown",
+      source: "Unknown",
+      notes: undefined,
+      confidence: "medium",
+    };
+
+    let finalDeal = fallbackDeal;
+    try {
+      const refinedDeal = await Promise.race([
+        refinedDealPromise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+      ]);
+      if (fallbackDeal && refinedDeal) {
+        finalDeal = mergeParsedDeals(fallbackDeal, refinedDeal);
+      }
+    } catch (err) {
+      console.error("Deep enrich card refinement failed:", err);
+    }
+
+    if (finalDeal) {
+      finalDeal.notes = [finalDeal.notes, "Deep research completed. Ready to save to CRM."].filter(Boolean).join(" | ");
+      await thread.post(buildDealCard(finalDeal));
     }
   } catch (err) {
     console.error("Deep enrich failed:", err);
