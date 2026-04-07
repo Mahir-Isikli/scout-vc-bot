@@ -1,0 +1,28 @@
+{
+  "name": "scout-worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 execute scout-db --file=migrations/0001_init.sql",
+    "db:seed": "wrangler d1 execute scout-db --file=seed.sql",
+    "db:migrate:remote": "wrangler d1 execute scout-db --file=migrations/0001_init.sql --remote",
+    "db:seed:remote": "wrangler d1 execute scout-db --file=seed.sql --remote"
+  },
+  "dependencies": {
+    "@ai-sdk/groq": "^3.0.34",
+    "@chat-adapter/slack": "^4.23.0",
+    "@chat-adapter/state-memory": "^4.23.0",
+    "ai": "^6.0.149",
+    "chat": "^4.23.0",
+    "exa-js": "^1.10.0",
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260405.0",
+    "@types/node": "^25.5.2",
+    "typescript": "^5.9.0",
+    "wrangler": "^4.0.0"
+  }
+}

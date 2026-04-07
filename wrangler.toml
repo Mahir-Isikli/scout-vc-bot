@@ -1,0 +1,12 @@
+name = "scout-worker"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "scout-db"
+database_id = "d8fd1b91-7f09-43b4-a7fc-6faa97b7fe10"
+
+[vars]
+# Non-secret env vars (secrets set via `wrangler secret put`)
