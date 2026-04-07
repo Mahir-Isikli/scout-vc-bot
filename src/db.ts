@@ -44,7 +44,10 @@ export interface DealStats {
 // ── Row mappers ──────────────────────────────────────────────────────
 
 function mapDealRow(r: any): Deal {
-  const tags: string[] = r.tags ? JSON.parse(r.tags) : [];
+  let tags: string[] = [];
+  try {
+    tags = Array.isArray(r.tags) ? r.tags : (r.tags ? JSON.parse(r.tags) : []);
+  } catch { tags = []; }
   const sectorTags = tags.filter(
     (t: string) =>
       !["stealth","hot-deal","second-time-founder","solo-founder","too-large","wish-we-had","conflict","overpriced","competitive","unverified","remote","berlin","france","germany","uk","portugal","poland","dach"].includes(t)
