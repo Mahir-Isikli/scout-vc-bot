@@ -119,7 +119,7 @@ function buildDealCard(deal: ParsedDeal, showActions = true) {
     children.push(Divider());
     children.push(Actions([
       Button({ id: "add_to_crm", style: "primary", label: "✅ Add to CRM", value: JSON.stringify(deal) }),
-      Button({ id: "enrich_deal", label: "🔍 Deep Enrich", value: `${deal.company}|${deal.founder}|${deal.sector}` }),
+      Button({ id: "deep_enrich_deal", label: "🔍 Deep Enrich", value: JSON.stringify({ company: deal.company, founder: deal.founder, sector: deal.sector }) }),
       Button({ id: "reject_deal", style: "danger" as any, label: "✉️ Pass / Reject", value: deal.company }),
     ]));
   }
@@ -295,15 +295,49 @@ async function handleEnrich(thread: any, target: string) {
   await thread.post(result.textStream);
 }
 
-async function handleDeepEnrich(thread: any, target: string) {
+async function runDeepEnrich(thread: any, company: string, founder?: string, sector?: string) {
   const { model, exa } = ctx();
-  await thread.post(`🔬 Running deep research on ${target}... (10-20 seconds)`);
-  const { companyResults, founderResults, competitorResults, marketResults } = await deepEnrichDeal(exa, target);
-  const all = [...companyResults, ...founderResults, ...competitorResults, ...marketResults];
-  if (all.length === 0) { await thread.post(`No deep research results for "${target}".`); return; }
-  const src = all.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.text}`).join("\n\n---\n\n");
-  const result = streamText({ model, system: `${SCOUT_SYSTEM_PROMPT}\n\nProduce a DEEP RESEARCH REPORT:\n## Company Overview\n## Founder & Team\n## Product & Traction\n## Funding History\n## Competitive Landscape\n## Market Opportunity\n## Key Risks\n## Sources\n\nCite [1],[2] etc.\n\nResults:\n${src}`, prompt: `Deep research report for: ${target}` });
-  await thread.post(result.textStream);
+  const normalizedFounder = founder && founder !== "Unknown" ? founder : undefined;
+  const normalizedSector = sector && sector !== "Unknown" ? sector : undefined;
+
+  await thread.post(`🔬 Running deep research on ${company}... (10-20 seconds)`);
+
+  try {
+    let { companyResults, founderResults, competitorResults, marketResults } = await deepEnrichDeal(
+      exa,
+      company,
+      normalizedFounder,
+      normalizedSector,
+    );
+
+    let all = [...companyResults, ...founderResults, ...competitorResults, ...marketResults];
+
+    // Fallback to the faster enrichment path if deep mode returns nothing useful.
+    if (all.length === 0) {
+      const fallback = await enrichDeal(exa, company, normalizedFounder, normalizedSector);
+      all = [...fallback.companyResults, ...fallback.founderResults, ...fallback.competitorResults, ...fallback.fundingNews];
+    }
+
+    if (all.length === 0) {
+      await thread.post(`No deep research results for "${company}".`);
+      return;
+    }
+
+    const src = all.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.text}`).join("\n\n---\n\n");
+    const result = streamText({
+      model,
+      system: `${SCOUT_SYSTEM_PROMPT}\n\nProduce a DEEP RESEARCH REPORT:\n## Company Overview\n## Founder & Team\n## Product & Traction\n## Funding History\n## Competitive Landscape\n## Market Opportunity\n## Key Risks\n## Sources\n\nCite [1],[2] etc.\n\nResults:\n${src}`,
+      prompt: `Deep research report for: ${company}`,
+    });
+    await thread.post(result.textStream);
+  } catch (err) {
+    console.error("Deep enrich failed:", err);
+    await thread.post(`Deep research failed for ${company}. Try again in a few seconds.`);
+  }
+}
+
+async function handleDeepEnrich(thread: any, target: string) {
+  await runDeepEnrich(thread, target);
 }
 
 async function handleStats(thread: any) {
@@ -360,16 +394,33 @@ function wireHandlers(bot: Chat) {
     }
   });
 
-  bot.onAction("enrich_deal", async (event) => {
-    const [company, founder, sector] = (event.value || "").split("|");
-    await event.thread!.post(`🔍 Enriching ${company}...`);
-    const { companyResults, founderResults, competitorResults, fundingNews } = await enrichDeal(ctx().exa, company, founder, sector);
-    const all = [...companyResults, ...founderResults, ...competitorResults, ...fundingNews];
-    if (all.length === 0) { await event.thread!.post(`No info found for ${company}.`); return; }
-    const src = all.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.text}`).join("\n\n---\n\n");
-    const result = streamText({ model: ctx().model, system: `${SCOUT_SYSTEM_PROMPT}\n\nSynthesize into enrichment brief.\n\n${src}`, prompt: `Enrichment for ${company}` });
-    await event.thread!.post(result.textStream);
-  });
+  const handleDeepEnrichAction = async (event: any) => {
+    let company = "the company";
+    let founder: string | undefined;
+    let sector: string | undefined;
+
+    try {
+      if ((event.value || "").startsWith("{")) {
+        const parsed = JSON.parse(event.value || "{}");
+        company = parsed.company || company;
+        founder = parsed.founder;
+        sector = parsed.sector;
+      } else {
+        const parts = (event.value || "").split("|");
+        company = parts[0] || company;
+        founder = parts[1];
+        sector = parts[2];
+      }
+    } catch {
+      company = event.value || company;
+    }
+
+    await runDeepEnrich(event.thread!, company, founder, sector);
+  };
+
+  bot.onAction("deep_enrich_deal", handleDeepEnrichAction);
+  // Backward compatibility for older cards that already exist in Slack
+  bot.onAction("enrich_deal", handleDeepEnrichAction);
 
   bot.onAction("reject_deal", async (event) => {
     await handleRejection(event.thread!, event.value || "the company");
