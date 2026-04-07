@@ -100,6 +100,34 @@ function detectIntent(text: string): Intent {
 // Card builders (function call API)
 // ---------------------------------------------------------------------------
 
+function mergeParsedDeals(base: ParsedDeal, refined: ParsedDeal): ParsedDeal {
+  const prefer = (primary?: string, fallback?: string) => {
+    const cleaned = (primary || "").trim();
+    if (!cleaned || cleaned.toLowerCase() === "unknown") return fallback || "Unknown";
+    return cleaned;
+  };
+
+  const confidenceRank: Record<ParsedDeal["confidence"], number> = { low: 0, medium: 1, high: 2 };
+  const mergedNotes = [base.notes, refined.notes]
+    .filter(Boolean)
+    .map((n) => n!.trim())
+    .filter((n, i, arr) => arr.indexOf(n) === i)
+    .join(" | ");
+
+  return {
+    company: prefer(refined.company, base.company),
+    founder: prefer(refined.founder, base.founder),
+    founderLinkedIn: prefer(refined.founderLinkedIn, base.founderLinkedIn) || undefined,
+    stage: prefer(refined.stage, base.stage),
+    roundSize: prefer(refined.roundSize, base.roundSize),
+    geo: prefer(refined.geo, base.geo),
+    sector: prefer(refined.sector, base.sector),
+    source: prefer(refined.source, base.source),
+    notes: mergedNotes || undefined,
+    confidence: confidenceRank[refined.confidence] >= confidenceRank[base.confidence] ? refined.confidence : base.confidence,
+  };
+}
+
 function buildDealCard(deal: ParsedDeal, showActions = true) {
   const stageEmoji: Record<string, string> = { "Pre-seed": "🌱", Seed: "🌿", "Series A": "🚀", "Series B": "📈", "Series C+": "🏢", Unknown: "❓" };
   const confEmoji: Record<string, string> = { high: "🟢", medium: "🟡", low: "🔴" };
@@ -119,7 +147,7 @@ function buildDealCard(deal: ParsedDeal, showActions = true) {
     children.push(Divider());
     children.push(Actions([
       Button({ id: "add_to_crm", style: "primary", label: "✅ Add to CRM", value: JSON.stringify(deal) }),
-      Button({ id: "deep_enrich_deal", label: "🔍 Deep Enrich", value: JSON.stringify({ company: deal.company, founder: deal.founder, sector: deal.sector }) }),
+      Button({ id: "deep_enrich_deal", label: "🔍 Deep Enrich", value: JSON.stringify({ company: deal.company, founder: deal.founder, sector: deal.sector, deal }) }),
       Button({ id: "reject_deal", style: "danger" as any, label: "✉️ Pass / Reject", value: deal.company }),
     ]));
   }
@@ -295,7 +323,7 @@ async function handleEnrich(thread: any, target: string) {
   await thread.post(result.textStream);
 }
 
-async function runDeepEnrich(thread: any, company: string, founder?: string, sector?: string) {
+async function runDeepEnrich(thread: any, company: string, founder?: string, sector?: string, originalDeal?: ParsedDeal) {
   const { model, exa } = ctx();
   const normalizedFounder = founder && founder !== "Unknown" ? founder : undefined;
   const normalizedSector = sector && sector !== "Unknown" ? sector : undefined;
@@ -324,12 +352,26 @@ async function runDeepEnrich(thread: any, company: string, founder?: string, sec
     }
 
     const src = all.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.text}`).join("\n\n---\n\n");
+    const refinedDealPromise = originalDeal
+      ? parseDealFromText(
+          model,
+          `Original structured deal:\n${JSON.stringify(originalDeal, null, 2)}\n\nResearch notes for ${company}:\n${src.slice(0, 12000)}`,
+        )
+      : Promise.resolve(null);
+
     const result = streamText({
       model,
       system: `${SCOUT_SYSTEM_PROMPT}\n\nProduce a DEEP RESEARCH REPORT:\n## Company Overview\n## Founder & Team\n## Product & Traction\n## Funding History\n## Competitive Landscape\n## Market Opportunity\n## Key Risks\n## Sources\n\nCite [1],[2] etc.\n\nResults:\n${src}`,
       prompt: `Deep research report for: ${company}`,
     });
     await thread.post(result.textStream);
+
+    const refinedDeal = await refinedDealPromise;
+    if (originalDeal && refinedDeal) {
+      const mergedDeal = mergeParsedDeals(originalDeal, refinedDeal);
+      mergedDeal.notes = [mergedDeal.notes, "Deep research completed. Ready to save to CRM."].filter(Boolean).join(" | ");
+      await thread.post(buildDealCard(mergedDeal));
+    }
   } catch (err) {
     console.error("Deep enrich failed:", err);
     await thread.post(`Deep research failed for ${company}. Try again in a few seconds.`);
@@ -398,6 +440,7 @@ function wireHandlers(bot: Chat) {
     let company = "the company";
     let founder: string | undefined;
     let sector: string | undefined;
+    let originalDeal: ParsedDeal | undefined;
 
     try {
       if ((event.value || "").startsWith("{")) {
@@ -405,6 +448,7 @@ function wireHandlers(bot: Chat) {
         company = parsed.company || company;
         founder = parsed.founder;
         sector = parsed.sector;
+        originalDeal = parsed.deal;
       } else {
         const parts = (event.value || "").split("|");
         company = parts[0] || company;
@@ -415,7 +459,7 @@ function wireHandlers(bot: Chat) {
       company = event.value || company;
     }
 
-    await runDeepEnrich(event.thread!, company, founder, sector);
+    await runDeepEnrich(event.thread!, company, founder, sector, originalDeal);
   };
 
   bot.onAction("deep_enrich_deal", handleDeepEnrichAction);
