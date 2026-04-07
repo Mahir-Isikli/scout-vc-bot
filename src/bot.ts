@@ -195,26 +195,37 @@ async function handleQuery(thread: any, question: string) {
   let crmContext = "";
   const lower = question.toLowerCase();
 
-  try {
-    const isBroad = /\b(all|list|export|every|pipeline|records|what.*(have|records|crm)|how many|total|overview)\b/i.test(question);
-    const statusMatch = lower.match(/\b(new|reviewing|passed|rejected|invested)\b/);
+  const appendDealsContext = (deals: Awaited<ReturnType<typeof listDeals>>, label: string) => {
+    if (deals.length === 0) return;
+    crmContext += `\n\n${label}:\n`;
+    for (const d of deals.slice(0, 20)) {
+      crmContext += `- ${d.company} (${d.status}): ${d.stage}, ${d.roundSize}, ${d.geo}, Sector: ${d.sector}`;
+      if (d.rejectionReason) crmContext += `, Rejection: ${d.rejectionReason}`;
+      if (d.partner) crmContext += `, Partner: ${d.partner}`;
+      if (d.notes) crmContext += `, Notes: ${d.notes}`;
+      crmContext += "\n";
+    }
+    if (deals.length > 20) crmContext += `... and ${deals.length - 20} more\n`;
+  };
 
-    if (isBroad || statusMatch) {
+  try {
+    const statusMatch = lower.match(/\b(new|reviewing|passed|rejected|invested)\b/);
+    const asksForList = /\b(all|list|show|every|export|overview|summary|total)\b/i.test(lower) || lower.startsWith("show me");
+    const asksAboutCollection = /\b(deals?|crm|pipeline|portfolio|records?)\b/i.test(lower);
+    const asksWhatWeHave = /what.*\b(have|in the crm|in crm|pipeline|records)\b/i.test(lower);
+    const isBroad = !!statusMatch || (asksForList && asksAboutCollection) || asksWhatWeHave || /\bhow many\b/i.test(lower);
+
+    if (isBroad) {
       const deals = await listDeals(db, statusMatch?.[1]);
-      if (deals.length > 0) {
-        crmContext += `\n\nCRM contains ${deals.length} deals${statusMatch ? ` with status '${statusMatch[1]}'` : " total"}:\n`;
-        for (const d of deals.slice(0, 20)) {
-          crmContext += `- ${d.company} (${d.status}): ${d.stage}, ${d.roundSize}, ${d.geo}, Sector: ${d.sector}`;
-          if (d.rejectionReason) crmContext += `, Rejection: ${d.rejectionReason}`;
-          if (d.partner) crmContext += `, Partner: ${d.partner}`;
-          crmContext += "\n";
-        }
-        if (deals.length > 20) crmContext += `... and ${deals.length - 20} more\n`;
-      }
+      appendDealsContext(deals, `CRM contains ${deals.length} deals${statusMatch ? ` with status '${statusMatch[1]}'` : " total"}`);
     } else {
       const searchTerm = (question.match(/(?:on|about|for|at)\s+([A-Z][A-Za-z0-9\s]+?)(?:\?|$|\s+(?:and|or|but))/)?.[1] ||
-        question.replace(/^(?:why did we |how many |what |who |when did |show me |find )/i, "").replace(/\?$/, "")).trim();
-      if (searchTerm.length > 1) {
+        question.replace(/^(?:why did we |how many |what |who |when did |show me |find |check |list |get |search |query )/i, "").replace(/\?$/, "")).trim();
+      const normalizedSearch = searchTerm.toLowerCase();
+      if (["deal", "deals", "crm", "pipeline", "portfolio", "records"].includes(normalizedSearch)) {
+        const deals = await listDeals(db);
+        appendDealsContext(deals, `CRM contains ${deals.length} deals total`);
+      } else if (searchTerm.length > 1) {
         const deals = await searchDeals(db, searchTerm);
         if (deals.length > 0) {
           crmContext += "\n\nRelevant deals from CRM:\n";
@@ -228,13 +239,13 @@ async function handleQuery(thread: any, question: string) {
       }
     }
 
-    const searchTerm = question.replace(/^(?:why did we |how many |what |who |when did |show me |find )/i, "").replace(/\?$/, "").trim();
-    if (searchTerm.length > 2) {
+    const searchTerm = question.replace(/^(?:why did we |how many |what |who |when did |show me |find |check |list |get |search |query )/i, "").replace(/\?$/, "").trim();
+    if (searchTerm.length > 2 && !["deal", "deals", "crm", "pipeline", "portfolio", "records"].includes(searchTerm.toLowerCase())) {
       const meetings = await searchMeetings(db, searchTerm);
       if (meetings.length > 0) {
         crmContext += "\nRelevant meeting notes:\n";
         for (const m of meetings) {
-          crmContext += `- ${m.date} "${m.title}": ${m.summary}`;
+          crmContext += `- ${m.date} \"${m.title}\": ${m.summary}`;
           if (m.outcome) crmContext += ` Outcome: ${m.outcome}`;
           crmContext += "\n";
         }
@@ -247,7 +258,7 @@ async function handleQuery(thread: any, question: string) {
 
   const result = streamText({
     model,
-    system: `${SCOUT_SYSTEM_PROMPT}\n\nYou have access to the following CRM and meeting data to answer the question:${crmContext || "\n\n(No matching records found in CRM)"}`,
+    system: `${SCOUT_SYSTEM_PROMPT}\n\nYou have access to the following CRM and meeting data to answer the question:${crmContext || "\n\n(No matching records found in CRM)"}\n\nImportant: if CRM data is present above, never say the CRM is empty or unreachable. Answer only from the provided CRM context.`,
     prompt: question,
   });
   await thread.post(result.textStream);

@@ -62,11 +62,45 @@ app.post("/api/webhooks/slack", async (c) => {
   // Read body once
   const bodyText = await c.req.raw.text();
 
-  // Handle Slack url_verification challenge
+  // Handle Slack url_verification challenge, and dedupe duplicate event deliveries
   try {
     const parsed = JSON.parse(bodyText);
     if (parsed.type === "url_verification" && parsed.challenge) {
       return c.text(parsed.challenge, 200);
+    }
+
+    if (parsed.type === "event_callback" && parsed.event) {
+      await env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS slack_event_dedup (
+          dedup_key TEXT PRIMARY KEY,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )`
+      ).run();
+
+      const ev = parsed.event as Record<string, any>;
+      const normalizedText = typeof ev.text === "string"
+        ? ev.text
+            .replace(/<@[^>]+>/g, "")
+            .replace(/@[A-Z0-9]{8,}/gi, "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 160)
+        : "";
+      const dedupKey = [
+        ev.channel || "",
+        ev.thread_ts || ev.ts || ev.event_ts || parsed.event_id || "",
+        ev.user || "",
+        normalizedText,
+      ].join("|");
+
+      const inserted = await env.DB.prepare(
+        `INSERT OR IGNORE INTO slack_event_dedup (dedup_key) VALUES (?1)`
+      ).bind(dedupKey).run();
+
+      if ((inserted.meta?.changes ?? 0) === 0) {
+        console.log(`[Scout] duplicate Slack event skipped: ${dedupKey}`);
+        return c.text("ok", 200);
+      }
     }
   } catch {
     // Not JSON, continue
