@@ -80,7 +80,7 @@ function detectIntent(text: string): Intent {
   if (lower.startsWith("enrich ") || lower.startsWith("research ") || lower.startsWith("look up ")) {
     return { type: "enrich", target: text.replace(/^(?:enrich|research|look\s+up)\s+/i, "").trim() };
   }
-  if (/^(why did we|how many|what|who|when did|show me|find )/i.test(lower) || lower.includes("?")) {
+  if (/^(why did we|how many|what|who|when did|show me|find |check |list |get |search |query )/i.test(lower) || lower.includes("?") || /\b(crm|deals?|pipeline|portfolio|reviewing|rejected|passed|invested|all deals|our deals|the deals)\b/i.test(lower)) {
     return { type: "query", question: text };
   }
   const dealIndicators = ["raising","round","seed","series","pre-seed","founder","ceo","startup","linkedin.com","pitch","deck","inbound","intro","referred","check out","take a look","forwarding","fyi","new deal","deal:","company:","million","saas","b2b","fintech","healthtech","deeptech","ai ","ml "];
@@ -308,14 +308,8 @@ async function handleGeneral(thread: any, text: string) {
 // Wire handlers (called once at startup)
 // ---------------------------------------------------------------------------
 
-// Track processed events to prevent duplicates (Slack sends both app_mention + message.channels)
-const processedEvents = new Set<string>();
-
 function wireHandlers(bot: Chat) {
   bot.onNewMention(async (thread, message) => {
-    const eventKey = (message as any).ts || `${Date.now()}`;
-    if (processedEvents.has(eventKey)) { console.log(`[Scout] skipping duplicate mention ${eventKey}`); return; }
-    processedEvents.add(eventKey);
     console.log(`[Scout] onNewMention text="${message.text}"`);
     try { await thread.subscribe(); } catch (e) { console.error("[Scout] subscribe failed:", e); }
     const text = message.text?.trim();
@@ -324,11 +318,13 @@ function wireHandlers(bot: Chat) {
   });
 
   bot.onSubscribedMessage(async (thread, message) => {
-    const eventKey = (message as any).ts || `${Date.now()}`;
-    if (processedEvents.has(eventKey)) { console.log(`[Scout] skipping duplicate subscribed ${eventKey}`); return; }
-    processedEvents.add(eventKey);
     const text = message.text?.trim();
     if (!text) return;
+    // Skip messages that contain a bot mention (already handled by onNewMention)
+    if (text.includes("<@U0AR042K291>") || /@U[A-Z0-9]+/i.test(text)) {
+      console.log(`[Scout] skipping subscribed msg (has mention, handled by onNewMention)`);
+      return;
+    }
     await handleMessage(thread, text);
   });
 
