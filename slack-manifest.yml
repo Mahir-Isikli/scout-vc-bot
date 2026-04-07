@@ -1,0 +1,43 @@
+display_information:
+  name: Scout
+  description: AI-powered VC deal flow assistant. Parse deals, enrich companies, query your pipeline, and draft rejection emails — all from Slack.
+  background_color: "#1a1a2e"
+  long_description: Scout is your automated VC deal flow operations partner. Mention @Scout with any unstructured deal text and it will parse it into a structured record. Ask questions about your pipeline in plain English. Enrich companies with live web research. Draft warm rejection emails in seconds. View a real-time pipeline dashboard. Scout connects directly to your D1 deal database and runs on Cloudflare Workers.
+
+features:
+  bot_user:
+    display_name: Scout
+    always_online: true
+  slash_commands: []
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read       # Receive @Scout mentions (onNewMention)
+      - chat:write               # Post messages and cards
+      - channels:history         # Read thread messages in public channels (onSubscribedMessage)
+      - groups:history           # Read thread messages in private channels
+      - im:history               # Read thread messages in DMs
+      - mpim:history             # Read thread messages in group DMs
+      - reactions:write          # Optional: add emoji reactions as acknowledgements
+
+settings:
+  event_subscriptions:
+    request_url: https://scout-worker.YOUR_SUBDOMAIN.workers.dev/api/webhooks/slack
+    bot_events:
+      - app_mention              # Triggers onNewMention
+      - message.channels         # Triggers onSubscribedMessage (public channels)
+      - message.groups           # Triggers onSubscribedMessage (private channels)
+      - message.im               # Triggers onSubscribedMessage (DMs)
+      - message.mpim             # Triggers onSubscribedMessage (group DMs)
+  interactivity:
+    is_enabled: true
+    request_url: https://scout-worker.YOUR_SUBDOMAIN.workers.dev/api/webhooks/slack
+    # Actions wired in bot.ts:
+    #   add_to_crm     → saves parsed deal to D1
+    #   enrich_deal    → runs Exa web research
+    #   reject_deal    → drafts rejection email via LLM
+    #   refresh_stats  → re-fetches pipeline dashboard
+  org_deploy_enabled: false
+  socket_mode_enabled: false    # App runs on Cloudflare Workers HTTP — NOT Socket Mode
+  token_rotation_enabled: false
