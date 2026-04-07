@@ -43,11 +43,19 @@ export interface DealStats {
 
 // ── Row mappers ──────────────────────────────────────────────────────
 
-function mapDealRow(r: any): Deal {
-  let tags: string[] = [];
+function safeParseArray(val: unknown): string[] {
+  if (Array.isArray(val)) return val;
+  if (typeof val !== 'string' || !val) return [];
   try {
-    tags = Array.isArray(r.tags) ? r.tags : (r.tags ? JSON.parse(r.tags) : []);
-  } catch { tags = []; }
+    let parsed = JSON.parse(val);
+    // Handle double-encoded JSON strings
+    if (typeof parsed === 'string') parsed = JSON.parse(parsed);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+function mapDealRow(r: any): Deal {
+  const tags = safeParseArray(r.tags);
   const sectorTags = tags.filter(
     (t: string) =>
       !["stealth","hot-deal","second-time-founder","solo-founder","too-large","wish-we-had","conflict","overpriced","competitive","unverified","remote","berlin","france","germany","uk","portugal","poland","dach"].includes(t)
@@ -73,15 +81,15 @@ function mapDealRow(r: any): Deal {
 }
 
 function mapMeetingRow(r: any): Meeting {
-  const decisions: string[] = r.key_decisions ? JSON.parse(r.key_decisions) : [];
+  const decisions = safeParseArray(r.key_decisions);
   return {
     id: r.id,
     title: r.title,
     date: r.date,
-    participants: r.participants ? JSON.parse(r.participants) : [],
+    participants: safeParseArray(r.participants),
     dealId: r.deal_id,
     summary: r.summary,
-    actionItems: r.action_items ? JSON.parse(r.action_items) : [],
+    actionItems: safeParseArray(r.action_items),
     outcome: decisions.length > 0 ? decisions[0] : undefined,
   };
 }

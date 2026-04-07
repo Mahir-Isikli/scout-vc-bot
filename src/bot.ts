@@ -308,8 +308,14 @@ async function handleGeneral(thread: any, text: string) {
 // Wire handlers (called once at startup)
 // ---------------------------------------------------------------------------
 
+// Track processed events to prevent duplicates (Slack sends both app_mention + message.channels)
+const processedEvents = new Set<string>();
+
 function wireHandlers(bot: Chat) {
   bot.onNewMention(async (thread, message) => {
+    const eventKey = (message as any).ts || `${Date.now()}`;
+    if (processedEvents.has(eventKey)) { console.log(`[Scout] skipping duplicate mention ${eventKey}`); return; }
+    processedEvents.add(eventKey);
     console.log(`[Scout] onNewMention text="${message.text}"`);
     try { await thread.subscribe(); } catch (e) { console.error("[Scout] subscribe failed:", e); }
     const text = message.text?.trim();
@@ -318,6 +324,9 @@ function wireHandlers(bot: Chat) {
   });
 
   bot.onSubscribedMessage(async (thread, message) => {
+    const eventKey = (message as any).ts || `${Date.now()}`;
+    if (processedEvents.has(eventKey)) { console.log(`[Scout] skipping duplicate subscribed ${eventKey}`); return; }
+    processedEvents.add(eventKey);
     const text = message.text?.trim();
     if (!text) return;
     await handleMessage(thread, text);
